@@ -26,9 +26,10 @@ export async function GET(req: NextRequest) {
 
   if (walletId) query = query.eq("wallet_id", walletId);
   if (month) {
+    const lastDay = new Date(parseInt(month.slice(0, 4)), parseInt(month.slice(5, 7)), 0).getDate();
     query = query
       .gte("date", `${month}-01`)
-      .lte("date", `${month}-31`);
+      .lte("date", `${month}-${lastDay}`);
   }
 
   const { data, error } = await query;

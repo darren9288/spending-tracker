@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     .from("transactions")
     .select("amount, category:categories(name, color), wallet:wallets(name, color)")
     .gte("date", `${month}-01`)
-    .lte("date", `${month}-31`);
+    .lte("date", `${month}-${new Date(parseInt(month.slice(0, 4)), parseInt(month.slice(5, 7)), 0).getDate()}`);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
