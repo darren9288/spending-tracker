@@ -8,20 +8,28 @@ export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState("");
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [walletFilter, setWalletFilter] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
-    const params = new URLSearchParams({ month });
-    if (walletFilter) params.set("wallet_id", walletFilter);
-    const [txRes, wRes] = await Promise.all([
-      fetch(`/api/transactions?${params}`).then((r) => r.json()),
-      fetch("/api/wallets").then((r) => r.json()),
-    ]);
-    setTransactions(Array.isArray(txRes) ? txRes : []);
-    setWallets(Array.isArray(wRes) ? wRes : []);
-    setLoading(false);
+    setFetchError("");
+    try {
+      const params = new URLSearchParams({ month });
+      if (walletFilter) params.set("wallet_id", walletFilter);
+      const [txRes, wRes] = await Promise.all([
+        fetch(`/api/transactions?${params}`).then((r) => r.json()),
+        fetch("/api/wallets").then((r) => r.json()),
+      ]);
+      if (txRes?.error) setFetchError(`DB error: ${txRes.error}`);
+      setTransactions(Array.isArray(txRes) ? txRes : []);
+      setWallets(Array.isArray(wRes) ? wRes : []);
+    } catch (e) {
+      setFetchError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
   }, [month, walletFilter]);
 
   useEffect(() => { load(); }, [load]);
@@ -70,6 +78,12 @@ export default function TransactionsPage() {
           </select>
         </div>
       </div>
+
+      {fetchError && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-sm text-red-400">
+          {fetchError}
+        </div>
+      )}
 
       {/* Summary bar */}
       {!loading && transactions.length > 0 && (
