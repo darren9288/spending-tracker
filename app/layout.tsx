@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import Nav from "@/components/Nav";
+import AppChrome from "@/components/AppChrome";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import ServiceWorkerUpdater from "@/components/ServiceWorkerUpdater";
 import OfflineBanner from "@/components/OfflineBanner";
@@ -29,10 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider>
           <ServiceWorkerUpdater />
           <OfflineBanner />
-          <Nav />
-          <main className="md:ml-56 pb-20 md:pb-0 min-h-screen">
-            <div className="max-w-3xl mx-auto px-4 py-6">{children}</div>
-          </main>
+          <AppChrome>{children}</AppChrome>
           <DevPanel />
         </ThemeProvider>
       </body>
