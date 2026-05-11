@@ -1,9 +1,9 @@
+import { ParseResult } from "./types";
+
 function extractJSON(text: string): unknown {
   const start = text.indexOf("{");
   if (start === -1) throw new Error("No JSON found in response");
-  let depth = 0;
-  let inString = false;
-  let escape = false;
+  let depth = 0, inString = false, escape = false;
   for (let i = start; i < text.length; i++) {
     const c = text[i];
     if (escape) { escape = false; continue; }
@@ -16,75 +16,88 @@ function extractJSON(text: string): unknown {
   throw new Error("Unbalanced JSON in response");
 }
 
-export type ParsedEntry = {
-  description: string;
-  amount: number;
-  category: string;
-  wallet: string | null;
-};
+function claudeUrl(): string {
+  const base = process.env.CLAUDE_PROXY_URL ?? "https://api.anthropic.com";
+  return base.endsWith("/v1") ? `${base}/messages` : `${base}/v1/messages`;
+}
 
-export type ParseResult = {
-  date: string;
-  entries: ParsedEntry[];
-};
-
-export async function parseExpenses(
-  text: string,
-  walletNames: string[]
-): Promise<ParseResult> {
-  const today = new Date().toISOString().split("T")[0];
-  const year = new Date().getFullYear();
-
-  const baseURL = process.env.CLAUDE_PROXY_URL ?? "https://api.anthropic.com";
-  const apiKey = process.env.ANTHROPIC_API_KEY!;
-
-  // Build the messages endpoint — handle both proxy and direct API URL shapes
-  const url = baseURL.endsWith("/v1")
-    ? `${baseURL}/messages`
-    : `${baseURL}/v1/messages`;
-
-  const res = await fetch(url, {
+async function callClaude(system: string, userContent: string, maxTokens = 1024): Promise<string> {
+  const res = await fetch(claudeUrl(), {
     method: "POST",
     headers: {
-      "x-api-key": apiKey,
+      "x-api-key": process.env.ANTHROPIC_API_KEY!,
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system: `You are an expense parser. Extract date, description, amount, category, and wallet from the user's text.
-Return ONLY valid JSON in this exact format:
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: "user", content: userContent }],
+    }),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  const data = await res.json();
+  const content = data.content?.[0];
+  if (!content || content.type !== "text") throw new Error("Unexpected response type");
+  return content.text as string;
+}
+
+// ── AI expense parser ─────────────────────────────────────────────────────────
+
+export async function parseExpenses(
+  text: string,
+  walletNames: string[],
+  categoryNames: string[]
+): Promise<ParseResult> {
+  const today = new Date().toISOString().split("T")[0];
+  const year = new Date().getFullYear();
+
+  const system = `You are a personal expense parser for a Malaysian user. Extract date and entries from the user's text.
+Return ONLY valid JSON:
 {
   "date": "YYYY-MM-DD",
   "entries": [
     {
       "description": "string",
       "amount": number,
-      "category": "Food|Transport|Shopping|Entertainment|Health|Bills|Other",
+      "type": "expense" or "income",
+      "category": "one of the known categories below",
       "wallet": "wallet name or null"
     }
   ]
 }
-
 Rules:
-- date: if user writes "24/4" or "24 April" → use year ${year}. If no date given, use today (${today}).
-- amount: numeric only, no currency symbols.
-- category: pick the closest match from: Food, Transport, Shopping, Entertainment, Health, Bills, Other.
-- wallet: if the user mentions a wallet name in parentheses like "(Maybank)" or inline like "paid with CIMB", extract it. Known wallets: ${walletNames.join(", ") || "none"}. Otherwise null.
-- Return ONLY the JSON, no explanation.`,
-      messages: [{ role: "user", content: text }],
-    }),
-  });
+- date: if user writes "24/4" or "24 April" use year ${year}. No date given → today (${today}).
+- amount: numeric only, no currency symbols. MYR assumed unless stated.
+- type: "income" if it's salary/refund/received money, else "expense".
+- category: pick the closest from known categories: ${categoryNames.join(", ") || "Food & Drinks, Transport, Other Expense"}.
+- wallet: if mentioned in brackets like "(Maybank)" or "paid with CIMB". Known wallets: ${walletNames.join(", ") || "none"}. Otherwise null.
+- Return ONLY the JSON.`;
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`${res.status} ${err}`);
-  }
+  const raw = await callClaude(system, text);
+  return extractJSON(raw) as ParseResult;
+}
 
-  const data = await res.json();
-  const content = data.content?.[0];
-  if (!content || content.type !== "text") throw new Error("Unexpected response type");
+// ── AI monthly summary ────────────────────────────────────────────────────────
 
-  return extractJSON(content.text) as ParseResult;
+export async function generateMonthlySummary(contextJson: string): Promise<string> {
+  const system = `You are a friendly personal finance assistant for a Malaysian user.
+Given a JSON summary of the user's spending data for the current month, write a short (3-4 sentences) insight card.
+Be specific about numbers. Use MYR (RM). Tone: warm, honest, actionable.
+Do NOT start with "I" or "Based on". Do NOT use bullet points. Plain prose only.`;
+  return callClaude(system, contextJson, 300);
+}
+
+// ── AI category suggestion ────────────────────────────────────────────────────
+
+export async function suggestCategory(
+  description: string,
+  categoryNames: string[]
+): Promise<string> {
+  const system = `You are a categorisation assistant. Given an expense description, return ONLY the name of the best matching category from this list: ${categoryNames.join(", ")}.
+Return only the category name, nothing else.`;
+  const result = await callClaude(system, description, 50);
+  const name = result.trim();
+  return categoryNames.includes(name) ? name : categoryNames[0] ?? "Other Expense";
 }
